@@ -63,18 +63,17 @@ import StringUtils
         let menuItem = NSMenuItem(title: "Preview Markdown", action: #selector(ContentViewController.toggleMarkdownPreview(_:)), keyEquivalent: "")
         #expect(viewController.validateUserInterfaceItem(menuItem))
         #expect(menuItem.state == .off)
-        #expect(viewController.splitViewItems.count == 1)
+        #expect(viewController.splitView.subviews.count == 1)
 
         viewController.toggleMarkdownPreview(nil)
         #expect(viewController.showsMarkdownPreview)
         #expect(viewController.validateUserInterfaceItem(menuItem))
         #expect(menuItem.state == .on)
-        #expect(viewController.splitViewItems.count == 2)
-        #expect(viewController.splitViewItems[1].minimumThickness == 200)
+        #expect(viewController.splitView.subviews.count == 2)
 
         viewController.toggleMarkdownPreview(nil)
         #expect(!viewController.showsMarkdownPreview)
-        #expect(viewController.splitViewItems.count == 1)
+        #expect(viewController.splitView.subviews.count == 1)
         #expect(viewController.validateUserInterfaceItem(menuItem))
         #expect(menuItem.state == .off)
     }
@@ -91,7 +90,62 @@ import StringUtils
         viewController.toggleMarkdownPreview(nil)
         #expect(!viewController.showsMarkdownPreview)
         #expect(menuItem.state == .off)
-        #expect(viewController.splitViewItems.count == 1)
+        #expect(viewController.splitView.subviews.count == 1)
+    }
+
+
+    @Test func previewRetainsUserSelectedWidth() async throws {
+
+        let viewController = ContentViewController(document: TextDocument())
+        _ = viewController.view
+        let window = NSWindow(contentViewController: viewController)
+        window.setContentSize(NSSize(width: 1_000, height: 720))
+        window.makeKeyAndOrderFront(nil)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        viewController.splitView.layoutSubtreeIfNeeded()
+        defer { window.close() }
+
+        viewController.toggleMarkdownPreview(nil)
+        viewController.view.layoutSubtreeIfNeeded()
+        viewController.splitView.layoutSubtreeIfNeeded()
+        viewController.splitView.setPosition(600, ofDividerAt: 0)
+        viewController.view.layoutSubtreeIfNeeded()
+        let previewView = viewController.splitView.subviews[1]
+        let editorView = viewController.splitView.subviews[0]
+        #expect(previewView.frame.width > 200)
+        let previewWidth = previewView.frame.width
+        let editorWidth = editorView.frame.width
+
+        for _ in 0..<2 {
+            viewController.toggleMarkdownPreview(nil)
+            viewController.toggleMarkdownPreview(nil)
+            viewController.view.layoutSubtreeIfNeeded()
+            let didRestoreWidth = await Task.waitFor { abs(previewView.frame.width - previewWidth) < 1.5 }
+
+            #expect(didRestoreWidth, "Restored preview width: \(previewView.frame.width), expected: \(previewWidth)")
+            #expect(abs(editorView.frame.width - editorWidth) < 1.5)
+        }
+    }
+
+
+    @Test func openingDocumentReplacesNoDocumentView() {
+
+        let viewController = ContentViewController(document: nil)
+        _ = viewController.view
+        #expect(viewController.splitView.subviews.count == 1)
+
+        let document = TextDocument()
+        viewController.document = document
+
+        let documentViewController = viewController.hostedViewController as? DocumentViewController
+        #expect(documentViewController?.document === document)
+        #expect(viewController.splitView.subviews.count == 1)
+        #expect(viewController.splitView.subviews[0] === documentViewController?.view)
+
+        viewController.toggleMarkdownPreview(nil)
+        #expect(viewController.showsMarkdownPreview)
+        #expect(viewController.splitView.subviews.count == 2)
     }
 
 
@@ -109,11 +163,11 @@ import StringUtils
         #expect(viewController.document === secondDocument)
         #expect(documentViewController?.document === secondDocument)
         #expect(!viewController.showsMarkdownPreview)
-        #expect(viewController.splitViewItems.count == 1)
-        #expect(viewController.splitViewItems[0].viewController === documentViewController)
+        #expect(viewController.splitView.subviews.count == 1)
+        #expect(viewController.splitView.subviews[0] === documentViewController?.view)
 
         viewController.toggleMarkdownPreview(nil)
         #expect(viewController.showsMarkdownPreview)
-        #expect(viewController.splitViewItems.count == 2)
+        #expect(viewController.splitView.subviews.count == 2)
     }
 }

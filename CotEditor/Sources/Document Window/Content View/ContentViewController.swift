@@ -26,7 +26,7 @@
 import AppKit
 import SwiftUI
 
-final class ContentViewController: NSSplitViewController {
+final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUserInterfaceValidations {
 
     // MARK: Public Properties
 
@@ -37,9 +37,10 @@ final class ContentViewController: NSSplitViewController {
 
     // MARK: Private Properties
 
-    private var markdownPreviewItem: NSSplitViewItem?
+    let splitView = NSSplitView()
 
-    private var isSettingMarkdownPreviewVisibility = false
+    private var markdownPreviewViewController: NSViewController?
+
     private var markdownPreviewWidth: CGFloat?
 
 
@@ -87,41 +88,57 @@ final class ContentViewController: NSSplitViewController {
 
         super.viewDidLoad()
 
-        let item = NSSplitViewItem(viewController: self.hostedViewController)
-        item.minimumThickness = 200
-        self.addSplitViewItem(item)
-
-        self.splitView.delegate = self
+        self.splitView.isVertical = true
         self.splitView.dividerStyle = .thin
+        self.splitView.delegate = self
+        self.splitView.addSubview(self.hostedViewController.view)
     }
 
 
-    // MARK: Split View Controller Methods
+    override func viewDidLayout() {
 
-    override func splitViewDidResizeSubviews(_ notification: Notification) {
+        super.viewDidLayout()
+        self.restoreMarkdownPreviewWidth()
+    }
 
-        super.splitViewDidResizeSubviews(notification)
+
+    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
+
+        view == self.hostedViewController.view
+    }
+
+
+    func splitView(_ splitView: NSSplitView, didResizeSubviews notification: Notification) {
+
+        self.restoreMarkdownPreviewWidth()
+    }
+
+
+    /// Restores the user-selected width after the split view lays out its reinserted pane.
+    private func restoreMarkdownPreviewWidth() {
 
         guard
-            self.splitViewItems.count > 1,
-            let previewItem = self.markdownPreviewItem,
-            !previewItem.isCollapsed
+            self.showsMarkdownPreview,
+            self.splitView.subviews.count > 1,
+            let width = self.markdownPreviewWidth
         else { return }
 
-        if !self.isSettingMarkdownPreviewVisibility {
-            self.markdownPreviewWidth = previewItem.viewController.view.frame.width
-        }
+        // Width restoration must follow the split view's reinserted-pane layout.
+        self.markdownPreviewWidth = nil
+        let availableWidth = max(0, self.splitView.bounds.width - self.splitView.dividerThickness - 200)
+        let previewWidth = min(width, availableWidth)
+        self.splitView.setPosition(self.splitView.bounds.width - previewWidth, ofDividerAt: 0)
     }
 
 
-    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+    func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
 
         switch item.action {
             case #selector(toggleMarkdownPreview):
                 (item as? NSMenuItem)?.state = self.showsMarkdownPreview ? .on : .off
                 return self.document is TextDocument
             default:
-                return super.validateUserInterfaceItem(item)
+                return true
         }
     }
 
@@ -135,26 +152,36 @@ final class ContentViewController: NSSplitViewController {
     }
 
 
+    // MARK: Split View Delegate Methods
+
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+
+        proposedMinimumPosition + 200
+    }
+
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+
+        proposedMaximumPosition - 200
+    }
+
+
     // MARK: Private Methods
 
     /// Creates the preview for the current text document if necessary.
     ///
-    /// - Returns: A split view item, or `nil` when the document is not text.
-    private func makeMarkdownPreviewItemIfNeeded() -> NSSplitViewItem? {
+    /// - Returns: A view controller, or `nil` when the document is not text.
+    private func makeMarkdownPreviewViewControllerIfNeeded() -> NSViewController? {
 
-        if let item = self.markdownPreviewItem { return item }
+        if let viewController = self.markdownPreviewViewController { return viewController }
         guard let document = self.document as? TextDocument else { return nil }
 
         let model = MarkdownPreviewModel(document: document)
         let viewController = NSHostingController(rootView: MarkdownPreviewView(model: model))
         viewController.sizingOptions = []
+        self.markdownPreviewViewController = viewController
 
-        let item = NSSplitViewItem(viewController: viewController)
-        item.minimumThickness = 200
-        item.preferredThicknessFraction = 0.5
-        self.markdownPreviewItem = item
-
-        return item
+        return viewController
     }
 
 
@@ -165,37 +192,25 @@ final class ContentViewController: NSSplitViewController {
 
         guard self.isViewLoaded else { return }
 
-        let previewItem = isVisible ? self.makeMarkdownPreviewItemIfNeeded() : self.markdownPreviewItem
+        let previewViewController = isVisible ? self.makeMarkdownPreviewViewControllerIfNeeded() : self.markdownPreviewViewController
         guard
-            let previewItem,
-            let model = (previewItem.viewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
+            let previewViewController,
+            let model = (previewViewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
         else {
             self.showsMarkdownPreview = false
             return
         }
 
-        self.isSettingMarkdownPreviewVisibility = true
-        defer { self.isSettingMarkdownPreviewVisibility = false }
-
         if isVisible {
             model.resume()
-
-            if !self.splitViewItems.contains(previewItem) {
-                self.addSplitViewItem(previewItem)
-            }
-            if let width = self.markdownPreviewWidth {
-                let availableWidth = self.splitView.bounds.width - self.splitView.dividerThickness
-                let editorMinimumWidth = previewItem.minimumThickness
-
-                self.splitView.setPosition(max(editorMinimumWidth, min(width, availableWidth - editorMinimumWidth)), ofDividerAt: 0)
-            }
+            previewViewController.view.frame.size = NSSize(width: self.markdownPreviewWidth ?? self.splitView.bounds.width / 2, height: self.splitView.bounds.height)
+            self.addChild(previewViewController)
+            self.splitView.addSubview(previewViewController.view)
         } else {
             model.suspend()
-
-            if self.splitViewItems.contains(previewItem) {
-                self.markdownPreviewWidth = previewItem.viewController.view.frame.width
-                self.removeSplitViewItem(previewItem)
-            }
+            self.markdownPreviewWidth = previewViewController.view.frame.width
+            previewViewController.view.removeFromSuperview()
+            previewViewController.removeFromParent()
         }
 
         self.view.layoutSubtreeIfNeeded()
@@ -209,17 +224,13 @@ final class ContentViewController: NSSplitViewController {
 
         guard oldDocument != self.document else { return }
 
-        // remove only the hosted view controller to preserve accessories such as the status bar
-        // -> Split view item accessory controllers can be attached as children (2026-05, macOS 26).
         self.removeMarkdownPreview()
         self.hostedViewController.viewIfLoaded?.removeFromSuperview()
         self.hostedViewController.removeFromParent()
 
         self.hostedViewController = Self.viewController(document: self.document)
         self.addChild(self.hostedViewController)
-        let item = NSSplitViewItem(viewController: self.hostedViewController)
-        item.minimumThickness = 200
-        self.insertSplitViewItem(item, at: 0)
+        self.splitView.addSubview(self.hostedViewController.view, positioned: .below, relativeTo: nil)
     }
 
 
@@ -227,15 +238,14 @@ final class ContentViewController: NSSplitViewController {
     private func removeMarkdownPreview() {
 
         guard
-            let previewItem = self.markdownPreviewItem,
-            let model = (previewItem.viewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
+            let previewViewController = self.markdownPreviewViewController,
+            let model = (previewViewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
         else { return }
 
         model.suspend()
-        if self.splitViewItems.contains(previewItem) {
-            self.removeSplitViewItem(previewItem)
-        }
-        self.markdownPreviewItem = nil
+        previewViewController.viewIfLoaded?.removeFromSuperview()
+        previewViewController.removeFromParent()
+        self.markdownPreviewViewController = nil
         self.markdownPreviewWidth = nil
         self.showsMarkdownPreview = false
     }

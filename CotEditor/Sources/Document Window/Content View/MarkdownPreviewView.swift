@@ -32,19 +32,28 @@ struct MarkdownPreviewView: View {
 
     @State var model: MarkdownPreviewModel
 
+    @State private var contentHeight: CGFloat = 0
+
 
     var body: some View {
 
         ScrollView {
             StructuredText(markdown: self.model.markdown, baseURL: self.model.baseURL)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+                    // Textual's table layout can grow after its initial scroll-view measurement.
+                    self.contentHeight = height
+                }
                 .textual.structuredTextStyle(.gitHub)
                 .textual.textSelection(.enabled)
                 .textual.imageAttachmentLoader(.image(relativeTo: self.model.baseURL))
                 .textual.overflowMode(.wrap)
                 .padding()
-                .frame(maxWidth: 800)
-                .frame(maxWidth: .infinity)
-                .containerRelativeFrame(.vertical, alignment: .top)
+                .frame(maxWidth: 800, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: self.contentHeight + 32, alignment: .topLeading)
+        }
+        .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+            self.contentHeight = height
         }
         .background(Color(nsColor: .textBackgroundColor))
         .accessibilityLabel(String(localized: "Markdown Preview", table: "Document", comment: "accessibility label"))
