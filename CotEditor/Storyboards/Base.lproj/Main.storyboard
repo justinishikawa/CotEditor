@@ -710,6 +710,15 @@ Gw
                                                 <action selector="toggleLineNumber:" target="Ady-hI-5gd" id="0ux-pU-v0B"/>
                                             </connections>
                                         </menuItem>
+                                        <menuItem title="Preview Markdown" secondaryImage="text.justify" catalog="system" id="mdP-re-vieW">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <attributedString key="userComments">
+                                                <fragment content="verb, preview the current document as Markdown"/>
+                                            </attributedString>
+                                            <connections>
+                                                <action selector="toggleMarkdownPreview:" target="Ady-hI-5gd" id="mdA-ct-ion1"/>
+                                            </connections>
+                                        </menuItem>
                                         <menuItem title="Show Status Bar" secondaryImage="inset.filled.bottomthird.rectangle" catalog="system" id="325">
                                             <modifierMask key="keyEquivalentModifierMask"/>
                                             <connections>

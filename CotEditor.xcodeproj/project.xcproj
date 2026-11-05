@@ -46,6 +46,12 @@
       },
     }, {
       "kind": "remote",
+      "repository": "https://github.com/gonzalezreal/textual",
+      "version": {
+        "up-to-next-major-version": "0.5.0",
+      },
+    }, {
+      "kind": "remote",
       "repository": "https://github.com/SimplyDanny/SwiftLintPlugins",
       "version": {
         "up-to-next-major-version": "0.62.0",
@@ -175,6 +181,10 @@
         }, {
           "package": "WFColorCode",
           "product-name": "ColorCode",
+          "build-phase": { "build-phase": "frameworks" },
+        }, {
+          "package": "textual",
+          "product-name": "Textual",
           "build-phase": { "build-phase": "frameworks" },
         },
       ],

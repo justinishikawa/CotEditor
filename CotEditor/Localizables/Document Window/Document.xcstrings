@@ -10912,6 +10912,17 @@
         }
       }
     },
+    "Markdown Preview" : {
+      "comment" : "accessibility label",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Markdown Preview"
+          }
+        }
+      }
+    },
     "Move to Trash" : {
       "comment" : "verb; button\nverb; menu item",
       "localizations" : {

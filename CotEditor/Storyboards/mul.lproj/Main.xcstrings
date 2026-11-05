@@ -9961,6 +9961,18 @@
         }
       }
     },
+    "mdP-re-vieW.title" : {
+      "comment" : "Class = \"NSMenuItem\"; title = \"Preview Markdown\"; ObjectID = \"mdP-re-vieW\";",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Preview Markdown"
+          }
+        }
+      }
+    },
     "404.title" : {
       "comment" : "Class = \"NSMenuItem\"; title = \"Smaller\"; ObjectID = \"404\";",
       "extractionState" : "extracted_with_value",

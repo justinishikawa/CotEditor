@@ -26,70 +26,227 @@
 import AppKit
 import SwiftUI
 
-final class ContentViewController: NSViewController {
-    
+final class ContentViewController: NSSplitViewController {
+
     // MARK: Public Properties
-    
+
     var document: DataDocument?  { didSet { self.updateDocument(from: oldValue) } }
-    
+
     private(set) var hostedViewController: NSViewController
-    
-    
+
+
+    // MARK: Private Properties
+
+    private var markdownPreviewItem: NSSplitViewItem?
+
+    private var isSettingMarkdownPreviewVisibility = false
+    private var markdownPreviewWidth: CGFloat?
+
+
+    /// Whether the Markdown preview is visible.
+    private(set) var showsMarkdownPreview = false {
+
+        didSet {
+            guard self.showsMarkdownPreview != oldValue else { return }
+
+            self.setMarkdownPreviewVisible(self.showsMarkdownPreview)
+        }
+    }
+
+
     // MARK: Lifecycle
-    
+
     init(document: DataDocument?) {
-        
+
         self.document = document
         self.hostedViewController = Self.viewController(document: document)
-        
+
         super.init(nibName: nil, bundle: nil)
-        
+
         self.addChild(self.hostedViewController)
     }
-    
-    
+
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
-        
+
         fatalError("init(coder:) has not been implemented")
     }
-    
-    
+
+
     override func loadView() {
-        
+
         let view = NSView()
-        view.embedSubview(self.hostedViewController.view)
-        
+        view.embedSubview(self.splitView)
+
         self.view = view
     }
-    
-    
+
+
+    override func viewDidLoad() {
+
+        super.viewDidLoad()
+
+        let item = NSSplitViewItem(viewController: self.hostedViewController)
+        item.minimumThickness = 200
+        self.addSplitViewItem(item)
+
+        self.splitView.delegate = self
+        self.splitView.dividerStyle = .thin
+    }
+
+
+    // MARK: Split View Controller Methods
+
+    override func splitViewDidResizeSubviews(_ notification: Notification) {
+
+        super.splitViewDidResizeSubviews(notification)
+
+        guard
+            self.splitViewItems.count > 1,
+            let previewItem = self.markdownPreviewItem,
+            !previewItem.isCollapsed
+        else { return }
+
+        if !self.isSettingMarkdownPreviewVisibility {
+            self.markdownPreviewWidth = previewItem.viewController.view.frame.width
+        }
+    }
+
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+
+        switch item.action {
+            case #selector(toggleMarkdownPreview):
+                (item as? NSMenuItem)?.state = self.showsMarkdownPreview ? .on : .off
+                return self.document is TextDocument
+            default:
+                return super.validateUserInterfaceItem(item)
+        }
+    }
+
+
+    // MARK: Action Messages
+
+    /// Toggles the Markdown preview pane for the current text document.
+    @IBAction func toggleMarkdownPreview(_ sender: Any?) {
+
+        self.showsMarkdownPreview.toggle()
+    }
+
+
     // MARK: Private Methods
-    
+
+    /// Creates the preview for the current text document if necessary.
+    ///
+    /// - Returns: A split view item, or `nil` when the document is not text.
+    private func makeMarkdownPreviewItemIfNeeded() -> NSSplitViewItem? {
+
+        if let item = self.markdownPreviewItem { return item }
+        guard let document = self.document as? TextDocument else { return nil }
+
+        let model = MarkdownPreviewModel(document: document)
+        let viewController = NSHostingController(rootView: MarkdownPreviewView(model: model))
+        viewController.sizingOptions = []
+
+        let item = NSSplitViewItem(viewController: viewController)
+        item.minimumThickness = 200
+        item.preferredThicknessFraction = 0.5
+        self.markdownPreviewItem = item
+
+        return item
+    }
+
+
+    /// Shows or hides the preview without replacing the document view.
+    ///
+    /// - Parameter isVisible: Whether the preview should be visible.
+    private func setMarkdownPreviewVisible(_ isVisible: Bool) {
+
+        guard self.isViewLoaded else { return }
+
+        let previewItem = isVisible ? self.makeMarkdownPreviewItemIfNeeded() : self.markdownPreviewItem
+        guard
+            let previewItem,
+            let model = (previewItem.viewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
+        else {
+            self.showsMarkdownPreview = false
+            return
+        }
+
+        self.isSettingMarkdownPreviewVisibility = true
+        defer { self.isSettingMarkdownPreviewVisibility = false }
+
+        if isVisible {
+            model.resume()
+
+            if !self.splitViewItems.contains(previewItem) {
+                self.addSplitViewItem(previewItem)
+            }
+            if let width = self.markdownPreviewWidth {
+                let availableWidth = self.splitView.bounds.width - self.splitView.dividerThickness
+                let editorMinimumWidth = previewItem.minimumThickness
+
+                self.splitView.setPosition(max(editorMinimumWidth, min(width, availableWidth - editorMinimumWidth)), ofDividerAt: 0)
+            }
+        } else {
+            model.suspend()
+
+            if self.splitViewItems.contains(previewItem) {
+                self.markdownPreviewWidth = previewItem.viewController.view.frame.width
+                self.removeSplitViewItem(previewItem)
+            }
+        }
+
+        self.view.layoutSubtreeIfNeeded()
+    }
+
+
     /// Updates the hosted view controller when the document changes.
     ///
     /// - Parameter oldDocument: The previous document.
     private func updateDocument(from oldDocument: DataDocument?) {
-        
+
         guard oldDocument != self.document else { return }
-        
+
         // remove only the hosted view controller to preserve accessories such as the status bar
         // -> Split view item accessory controllers can be attached as children (2026-05, macOS 26).
+        self.removeMarkdownPreview()
         self.hostedViewController.viewIfLoaded?.removeFromSuperview()
         self.hostedViewController.removeFromParent()
-        
+
         self.hostedViewController = Self.viewController(document: self.document)
         self.addChild(self.hostedViewController)
-        self.viewIfLoaded?.embedSubview(self.hostedViewController.view)
+        let item = NSSplitViewItem(viewController: self.hostedViewController)
+        item.minimumThickness = 200
+        self.insertSplitViewItem(item, at: 0)
     }
-    
-    
+
+
+    /// Removes the current document's preview before switching documents.
+    private func removeMarkdownPreview() {
+
+        guard
+            let previewItem = self.markdownPreviewItem,
+            let model = (previewItem.viewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
+        else { return }
+
+        model.suspend()
+        if self.splitViewItems.contains(previewItem) {
+            self.removeSplitViewItem(previewItem)
+        }
+        self.markdownPreviewItem = nil
+        self.markdownPreviewWidth = nil
+        self.showsMarkdownPreview = false
+    }
+
+
     /// Creates a new view controller with the passed-in document.
     ///
     /// - Parameter document: The represented document.
     /// - Returns: A view controller.
     private static func viewController(document: DataDocument?) -> NSViewController {
-        
+
         switch document {
             case let document as TextDocument:
                 DocumentViewController(document: document)
@@ -101,32 +258,32 @@ final class ContentViewController: NSViewController {
                 preconditionFailure()
         }
     }
-    
-    
+
+
     /// Creates a hosting controller that doesn’t propagate the SwiftUI content’s ideal size to the split view pane layout.
     ///
     /// - Parameter rootView: The SwiftUI view to host.
     /// - Returns: A hosting controller.
     private static func hostingController(rootView: some View) -> NSViewController {
-        
+
         let controller = NSHostingController(rootView: rootView)
         controller.sizingOptions = []
-        
+
         return controller
     }
 }
 
 
 private extension NSView {
-    
+
     /// Adds a subview constrained to fill the receiver.
     ///
     /// - Parameter subview: The subview to embed.
     func embedSubview(_ subview: NSView) {
-        
+
         subview.translatesAutoresizingMaskIntoConstraints = false
         self.addSubview(subview)
-        
+
         NSLayoutConstraint.activate([
             subview.leadingAnchor.constraint(equalTo: self.leadingAnchor),
             subview.trailingAnchor.constraint(equalTo: self.trailingAnchor),
