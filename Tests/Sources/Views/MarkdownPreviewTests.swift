@@ -24,6 +24,7 @@
 //
 
 import AppKit
+import Observation
 import Testing
 import StringUtils
 @testable import CotEditor
@@ -55,6 +56,52 @@ import StringUtils
     }
 
 
+    @Test func previewModelObservesBaseURLChanges() async {
+
+        let document = TextDocument()
+        let model = MarkdownPreviewModel(document: document)
+        let directoryURL = URL(filePath: "/tmp/MarkdownPreviewTests", directoryHint: .isDirectory)
+
+        await confirmation("The model publishes file URL changes to SwiftUI.") { confirmation in
+            withObservationTracking {
+                _ = model.baseURL
+            } onChange: {
+                confirmation()
+            }
+
+            document.fileURL = directoryURL.appending(component: "note.md")
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+
+        #expect(model.baseURL == directoryURL)
+    }
+
+
+    @Test func previewImageLoaderResolvesRelativeFileURL() async throws {
+
+        let directoryURL = FileManager.default.temporaryDirectory.appending(component: UUID().uuidString, directoryHint: .isDirectory)
+        let assetsURL = directoryURL.appending(component: "assets", directoryHint: .isDirectory)
+        let imageURL = assetsURL.appending(component: "image.png")
+        try FileManager.default.createDirectory(at: assetsURL, withIntermediateDirectories: true)
+        try Data().write(to: imageURL)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let loader = MarkdownPreviewAttachmentLoader(baseURL: directoryURL)
+        let resolvedURL = try await loader.resolvedURL(for: URL(string: "assets/image.png")!)
+
+        #expect(resolvedURL == imageURL)
+    }
+
+
+    @Test func previewImageLoaderLeavesRemoteURLUnchanged() async throws {
+
+        let remoteURL = try #require(URL(string: "https://example.com/image.png"))
+        let loader = MarkdownPreviewAttachmentLoader(baseURL: URL(filePath: "/tmp"))
+
+        #expect(try await loader.resolvedURL(for: remoteURL) == remoteURL)
+    }
+
+
     @Test func previewToggleAndValidation() throws {
 
         let viewController = ContentViewController(document: TextDocument())
@@ -76,6 +123,37 @@ import StringUtils
         #expect(viewController.splitView.subviews.count == 1)
         #expect(viewController.validateUserInterfaceItem(menuItem))
         #expect(menuItem.state == .off)
+    }
+
+
+    @Test func previewToggleBeforeViewLoad() throws {
+
+        let viewController = ContentViewController(document: TextDocument())
+        let menuItem = NSMenuItem(title: "Preview Markdown", action: #selector(ContentViewController.toggleMarkdownPreview(_:)), keyEquivalent: "")
+
+        viewController.toggleMarkdownPreview(nil)
+        #expect(!viewController.isViewLoaded)
+        _ = viewController.view
+
+        #expect(viewController.showsMarkdownPreview)
+        #expect(viewController.validateUserInterfaceItem(menuItem))
+        #expect(menuItem.state == .on)
+        #expect(viewController.splitView.subviews.count == 2)
+    }
+
+
+    @Test func previewUnavailableBeforeViewLoad() throws {
+
+        let viewController = ContentViewController(document: nil)
+        let menuItem = NSMenuItem(title: "Preview Markdown", action: #selector(ContentViewController.toggleMarkdownPreview(_:)), keyEquivalent: "")
+
+        viewController.toggleMarkdownPreview(nil)
+        _ = viewController.view
+
+        #expect(!viewController.showsMarkdownPreview)
+        #expect(!viewController.validateUserInterfaceItem(menuItem))
+        #expect(menuItem.state == .off)
+        #expect(viewController.splitView.subviews.count == 1)
     }
 
 
@@ -104,6 +182,8 @@ import StringUtils
         window.layoutIfNeeded()
         try await Task.sleep(for: .milliseconds(100))
         viewController.splitView.layoutSubtreeIfNeeded()
+        #expect(window.contentLayoutRect.width == 1_000)
+        #expect(viewController.splitView.bounds.width == 1_000)
         defer { window.close() }
 
         viewController.toggleMarkdownPreview(nil)
@@ -117,15 +197,39 @@ import StringUtils
         let previewWidth = previewView.frame.width
         let editorWidth = editorView.frame.width
 
-        for _ in 0..<2 {
-            viewController.toggleMarkdownPreview(nil)
+        for _ in 0..<3 {
             viewController.toggleMarkdownPreview(nil)
             viewController.view.layoutSubtreeIfNeeded()
-            let didRestoreWidth = await Task.waitFor { abs(previewView.frame.width - previewWidth) < 1.5 }
+            viewController.splitView.layoutSubtreeIfNeeded()
+            #expect(viewController.splitView.subviews.count == 1)
+
+            viewController.toggleMarkdownPreview(nil)
+            viewController.view.layoutSubtreeIfNeeded()
+            viewController.splitView.layoutSubtreeIfNeeded()
+            let didRestoreWidth = await Task.waitFor { abs(previewView.frame.width - previewWidth) < 0.5 }
 
             #expect(didRestoreWidth, "Restored preview width: \(previewView.frame.width), expected: \(previewWidth)")
-            #expect(abs(editorView.frame.width - editorWidth) < 1.5)
+            #expect(abs(editorView.frame.width - editorWidth) < 0.5)
         }
+    }
+
+
+    @Test func documentReplacementBeforeViewLoadDoesNotLoadViews() throws {
+
+        let viewController = ContentViewController(document: nil)
+        #expect(!viewController.isViewLoaded)
+
+        let document = TextDocument()
+        viewController.document = document
+
+        #expect(!viewController.isViewLoaded)
+        #expect(viewController.hostedViewController.viewIfLoaded == nil)
+
+        _ = viewController.view
+        let documentViewController = try #require(viewController.hostedViewController as? DocumentViewController)
+        #expect(documentViewController.document === document)
+        #expect(viewController.splitView.subviews.count == 1)
+        #expect(viewController.splitView.subviews[0] === documentViewController.view)
     }
 
 

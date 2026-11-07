@@ -39,7 +39,7 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
 
     let splitView = NSSplitView()
 
-    private var markdownPreviewViewController: NSViewController?
+    private var markdownPreviewViewController: NSHostingController<MarkdownPreviewView>?
 
     private var markdownPreviewWidth: CGFloat?
 
@@ -92,6 +92,7 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
         self.splitView.dividerStyle = .thin
         self.splitView.delegate = self
         self.splitView.addSubview(self.hostedViewController.view)
+        self.setMarkdownPreviewVisible(self.showsMarkdownPreview)
     }
 
 
@@ -127,7 +128,7 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
         self.markdownPreviewWidth = nil
         let availableWidth = max(0, self.splitView.bounds.width - self.splitView.dividerThickness - 200)
         let previewWidth = min(width, availableWidth)
-        self.splitView.setPosition(self.splitView.bounds.width - previewWidth, ofDividerAt: 0)
+        self.splitView.setPosition(self.splitView.bounds.width - self.splitView.dividerThickness - previewWidth, ofDividerAt: 0)
     }
 
 
@@ -171,14 +172,13 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
     /// Creates the preview for the current text document if necessary.
     ///
     /// - Returns: A view controller, or `nil` when the document is not text.
-    private func makeMarkdownPreviewViewControllerIfNeeded() -> NSViewController? {
+    private func makeMarkdownPreviewViewControllerIfNeeded() -> NSHostingController<MarkdownPreviewView>? {
 
         if let viewController = self.markdownPreviewViewController { return viewController }
         guard let document = self.document as? TextDocument else { return nil }
 
         let model = MarkdownPreviewModel(document: document)
-        let viewController = NSHostingController(rootView: MarkdownPreviewView(model: model))
-        viewController.sizingOptions = []
+        let viewController = Self.hostingController(rootView: MarkdownPreviewView(model: model))
         self.markdownPreviewViewController = viewController
 
         return viewController
@@ -193,13 +193,11 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
         guard self.isViewLoaded else { return }
 
         let previewViewController = isVisible ? self.makeMarkdownPreviewViewControllerIfNeeded() : self.markdownPreviewViewController
-        guard
-            let previewViewController,
-            let model = (previewViewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
-        else {
+        guard let previewViewController else {
             self.showsMarkdownPreview = false
             return
         }
+        let model = previewViewController.rootView.model
 
         if isVisible {
             model.resume()
@@ -230,21 +228,20 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
 
         self.hostedViewController = Self.viewController(document: self.document)
         self.addChild(self.hostedViewController)
-        self.splitView.addSubview(self.hostedViewController.view, positioned: .below, relativeTo: nil)
+        if self.isViewLoaded {
+            self.splitView.addSubview(self.hostedViewController.view, positioned: .below, relativeTo: nil)
+        }
     }
 
 
     /// Removes the current document's preview before switching documents.
     private func removeMarkdownPreview() {
 
-        guard
-            let previewViewController = self.markdownPreviewViewController,
-            let model = (previewViewController as? NSHostingController<MarkdownPreviewView>)?.rootView.model
-        else { return }
-
-        model.suspend()
-        previewViewController.viewIfLoaded?.removeFromSuperview()
-        previewViewController.removeFromParent()
+        if let previewViewController = self.markdownPreviewViewController {
+            previewViewController.rootView.model.suspend()
+            previewViewController.viewIfLoaded?.removeFromSuperview()
+            previewViewController.removeFromParent()
+        }
         self.markdownPreviewViewController = nil
         self.markdownPreviewWidth = nil
         self.showsMarkdownPreview = false
@@ -274,7 +271,7 @@ final class ContentViewController: NSViewController, NSSplitViewDelegate, NSUser
     ///
     /// - Parameter rootView: The SwiftUI view to host.
     /// - Returns: A hosting controller.
-    private static func hostingController(rootView: some View) -> NSViewController {
+    private static func hostingController<Content: View>(rootView: Content) -> NSHostingController<Content> {
 
         let controller = NSHostingController(rootView: rootView)
         controller.sizingOptions = []
